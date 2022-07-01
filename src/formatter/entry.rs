@@ -5,6 +5,7 @@ pub struct ReporterEntry {
 	pub character: Option<u32>,
 	pub module: Option<String>,
 	pub value: Option<String>,
+	pub suffix: Option<String>,
 }
 
 impl ReporterEntry {
@@ -13,6 +14,7 @@ impl ReporterEntry {
 		line: Option<u32>,
 		character: Option<u32>,
 		mut value: Option<String>,
+		suffix: Option<String>,
 	) -> ReporterEntry {
 		let mut module = None;
 		if let Some(value) = &mut value {
@@ -26,6 +28,7 @@ impl ReporterEntry {
 			character,
 			module,
 			value,
+			suffix
 		}
 	}
 

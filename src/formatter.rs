@@ -5,10 +5,10 @@ use std::{fmt};
 use std::fmt::{Formatter, Write};
 use owo_colors::{DynColors, OwoColorize};
 
-use crate::audit::{Audit, AuditSectionEntry};
+use crate::audit::{AuditSection, AuditSectionEntry};
 
 pub trait AuditFormatter: Sync  {
-    fn format(&self, f: &mut Formatter, audit: &Audit) -> fmt::Result;
+    fn format(&self, f: &mut Formatter, sections: &[AuditSection]) -> fmt::Result;
 }
 
 pub struct AnywaysAuditFormatter {
@@ -16,8 +16,8 @@ pub struct AnywaysAuditFormatter {
 }
 
 impl AuditFormatter for AnywaysAuditFormatter {
-    fn format(&self, f: &mut Formatter, audit: &Audit) -> fmt::Result {
-        self.format(f, audit)
+    fn format(&self, f: &mut Formatter, sections: &[AuditSection]) -> fmt::Result {
+        self.format(f, sections)
     }
 }
 
@@ -30,8 +30,8 @@ impl Default for AnywaysAuditFormatter {
 }
 
 impl AnywaysAuditFormatter {
-    pub fn format(&self, f: &mut Formatter<'_>, audit: &Audit) -> fmt::Result {
-        for section in &audit.sections {
+    pub fn format(&self, f: &mut Formatter<'_>, sections: &[AuditSection]) -> fmt::Result {
+        for section in sections {
             self.write_section_header(f, &section.name, section.color)?;
             for entry in &section.entries {
                 self.write_section_entry(f, entry, section.color)?;
@@ -54,7 +54,11 @@ impl AnywaysAuditFormatter {
         }
 
         if entry.prefix_left.is_some() || entry.prefix_right.is_some()  {
-            write!(&mut text, " {} ", "|".white().bold())?;
+            if entry.suffix.is_some() {
+                write!(&mut text, " {} ", "+".color(color).bold())?;
+            } else {
+                write!(&mut text, " {} ", "|".white())?;
+            }
         }
 
         if let Some(right) = &entry.prefix_right {
@@ -67,19 +71,21 @@ impl AnywaysAuditFormatter {
         let content_width = self.width as usize - 4;
         if get_length(&text) > content_width {
             let mut line = String::new();
+            let mut suffix = entry.suffix.as_deref();
             for ch in text.chars() {
                 line.push(ch);
-                if get_length(&line) == content_width {
-                    self.write_section_line(f, &line, color)?;
+                let length = suffix.map(get_length).unwrap_or(0) + get_length(&line);
+                if length == content_width {
+                    self.write_section_line(f, &line, suffix.take(), color)?;
                     line.clear();
                 }
             }
 
             if !line.is_empty() {
-                self.write_section_line(f, &line, color)?;
+                self.write_section_line(f, &line, suffix.take(),color)?;
             }
         } else {
-            self.write_section_line(f, &text, color)?;
+            self.write_section_line(f, &text, entry.suffix.as_deref(),color)?;
         }
 
         Ok(())
@@ -96,13 +102,20 @@ impl AnywaysAuditFormatter {
         )
     }
 
-    fn write_section_line(&self, f: &mut Formatter<'_>, text: &str, color: DynColors) -> fmt::Result {
-        let s = "│".color(color);
+    fn write_section_line(&self, f: &mut Formatter<'_>, text: &str, suffix: Option<&str>, color: DynColors) -> fmt::Result {
+        let suffix = suffix.unwrap_or("");
+
+        let ls = "│ ".color(color).to_string();
+        let rs = if suffix.is_empty() {
+            " │".color(color).to_string()
+        } else {
+            " +│".color(color).bold().to_string()
+        };
+
         writeln!(
             f,
-            "{s} {}{} {s}",
-            text,
-            create_pad(" ", text, self.width as usize - 4)
+            "{ls}{text}{}{suffix}{rs}",
+            create_pad(" ", text, self.width as usize - get_length(&ls) - get_length(&rs) - get_length(suffix))
         )
     }
 

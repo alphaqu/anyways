@@ -36,20 +36,50 @@ pub fn set_audit_processor(processor: impl AuditProcessor + 'static) {
     }
 }
 
-pub fn get_audit_formatter() -> &'static Box<dyn AuditFormatter> {
+pub fn get_audit_formatter() -> &'static dyn AuditFormatter {
     unsafe {
         if AUDIT_FORMATTER.is_none() {
             set_audit_formatter(AnywaysAuditFormatter::default());
         }
-        AUDIT_FORMATTER.as_ref().unwrap()
+        AUDIT_FORMATTER.as_deref().unwrap()
     }
 }
 
-pub fn get_audit_processor() -> &'static Box<dyn AuditProcessor> {
+pub fn get_audit_processor() -> &'static dyn AuditProcessor {
     unsafe {
         if AUDIT_PROCESSOR.is_none() {
             set_audit_processor(AnywaysAuditProcessor::default());
         }
-        AUDIT_PROCESSOR.as_ref().unwrap()
+        AUDIT_PROCESSOR.as_deref().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+    use backtrace::{BacktraceFrame, resolve_frame};
+    use crate::ext::AuditExt;
+    use crate::Result;
+
+    #[test]
+    fn thigns() -> Result<()> {
+        let result = read_plugin_before();
+        result.wrap_err("Failed to read plugin")
+    }
+
+    fn read_plugin_before() -> Result<()> {
+        match read_plugin() {
+            Ok(_) => {}
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        Ok(())
+    }
+
+    fn read_plugin() -> Result<()> {
+        File::open("./your mom is very gay").wrap_err_with(|| "Failed to read file")?;
+
+        Ok(())
     }
 }
