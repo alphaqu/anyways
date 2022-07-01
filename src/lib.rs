@@ -1,165 +1,55 @@
-#![feature(backtrace)]
-#![feature(backtrace_frames)]
-#![feature(error_iter)]
+//! # Anyways
+//! Anyways is a dynamic error reporting library.
+//! Which allows you to not worry about creating error types and instead handling errors.
+//!
+//! This library is not recommended for other libraries to use and instead it is
+//! advised to use something like `thiserror` to easily generate concrete types to make it easier for other people to use the library.
+//! Instead this is intended for applications where a ton of libraries are used to create a product and where making a concrete error type is not feasible.
+//!
+//! ## Panic Processes
+//! 1. Audit gets made
+//! 2. The AuditProcessor removes useless information and makes the information more digestible
+//! 3. The AuditFormatter formats the audit sections to the output.
+use crate::audit::Audit;
+use crate::formatter::{AnywaysAuditFormatter, AuditFormatter};
+use crate::processor::{AnywaysAuditProcessor, AuditProcessor};
 
-pub mod handler;
-mod default;
-mod util;
-//mod wrap;
+pub mod audit;
+pub mod ext;
+pub mod formatter;
+pub mod processor;
 
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
-use backtrace::{Backtrace};
-use std::rc::Rc;
+pub type Result<T, E = Audit> = std::result::Result<T, E>;
 
-#[derive(Clone)]
-pub struct Report {
-	pub backtrace: Backtrace,
-	pub sections: Vec<Section>,
-	pub errors: Vec<Rc<Box<dyn Error + 'static + Send + Sync>>>
+static mut AUDIT_FORMATTER: Option<Box<dyn AuditFormatter>> = None;
+static mut AUDIT_PROCESSOR: Option<Box<dyn AuditProcessor>> = None;
+
+pub fn set_audit_formatter(formatter: impl AuditFormatter + 'static) {
+    unsafe {
+        AUDIT_FORMATTER = Some(Box::new(formatter));
+    }
 }
 
-impl Report {
-	pub fn new<E: Into<Box<dyn Error + 'static + Send + Sync>>>(err: E) -> Report {
-		Report {
-			backtrace: Backtrace::new_unresolved(),
-			sections: vec![],
-			errors: vec![Rc::new(err.into())]
-		}
-	}
-
-	pub fn push_err<E: Into<Box<dyn Error + 'static + Send + Sync>>>(&mut self, err: E) {
-		self.errors.push(Rc::new(err.into()));
-	}
+pub fn set_audit_processor(processor: impl AuditProcessor + 'static) {
+    unsafe {
+        AUDIT_PROCESSOR = Some(Box::new(processor));
+    }
 }
 
-impl<I: Into<Box<dyn Error + 'static + Send + Sync>>> From<I> for Report {
-	fn from(err: I) -> Self {
-		Report::new(err)
-	}
+pub fn get_audit_formatter() -> &'static Box<dyn AuditFormatter> {
+    unsafe {
+        if AUDIT_FORMATTER.is_none() {
+            set_audit_formatter(AnywaysAuditFormatter::default());
+        }
+        AUDIT_FORMATTER.as_ref().unwrap()
+    }
 }
 
-impl Debug for Report {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		handler::fmt(f, self)
-	}
-}
-
-impl Display for Report {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		handler::fmt(f, self)
-	}
-}
-
-#[derive(Clone)]
-pub struct Section {
-	pub name: String,
-	pub entries: Vec<SectionEntry>
-}
-
-#[derive(Clone)]
-pub struct SectionEntry {
-	pub prefix: String,
-	pub suffix: String,
-	pub value: String,
-}
-
-#[cfg(test)]
-mod tests {
-	use std::fs;
-	use std::ops::Deref;
-	use crate::Report;
-	use crate::util::ReportExt;
-
-	#[test]
-	fn it_works() -> Result<(), Report> {
-		testing()
-	}
-
-	fn testing() -> Result<(), Report> {
-		haha_testing()
-	}
-
-
-	fn haha_testing() -> Result<(), Report>{
-		another_not_swear_word_mod::testing_in_another_one()
-	}
-
-	mod another_not_swear_word_mod {
-		use owo_colors::OwoColorize;
-		use crate::{Report, Section, SectionEntry};
-		use crate::tests::Stuff;
-		use crate::util::ReportExt;
-
-		pub(crate) fn testing_in_another_one() -> Result<(), Report> {
-			let mut section = Section {
-				name: "Hasfjasdlkfjslda".green().to_string(),
-				entries: vec![
-					SectionEntry {
-						prefix: "prefix".to_string(),
-						suffix: "suffix".to_string(),
-						value: "value that should prob tell you stuff".to_string()
-					},
-					SectionEntry {
-						prefix: "ugh".to_string(),
-						suffix: "agh".to_string(),
-						value: "value that should prob tell you less important stuff".to_string()
-					},
-					SectionEntry {
-						prefix: "ugh".to_string(),
-						suffix: "agh".to_string(),
-						value: format!("look we got stuff {}", "color".cyan().italic().bold().underline().strikethrough())
-					}
-				],
-			};
-
-			let mut result = haha_testing_super_funny_once_again().wrap_err_with(|| "I just had meatballs, they were pretty great.");
-			if let Err(error) = &mut result  {
-				error.sections.push(section);
-			}
-			result
-		}
-
-
-		pub(crate) fn haha_testing_super_funny_once_again() -> Result<(), Report>{
-
-			let closure = || {
-				let inner_closure = || {
-					Err(Report::new("hi"))
-				};
-
-				let stuff = Stuff {
-					inner: Box::new(inner_closure)
-				};
-				stuff()?;
-
-				Ok(())
-			};
-
-			closure_invoker(closure).wrap_err("very funny testing exists here")
-		}
-
-		pub(crate) fn closure_invoker(value: impl FnOnce() -> Result<(), Report>) -> Result<(), Report> {
-			value().wrap_err("well we just invoked a closure")?;
-
-			Ok(())
-		}
-	}
-
-	pub struct Stuff {
-		inner: Box<dyn Fn() -> Result<(), Report>>
-	}
-
-	impl Deref for Stuff {
-		type Target = dyn Fn() -> Result<(), Report>;
-
-		fn deref(&self) -> &Self::Target {
-			&|| {
-				//let result: Result<(), &str> = Err("fdas");
-				//result.unwrap();
-
-				fs::write("./dir/that/does/not/exist", "fadfa").wrap_err("hello")
-			}
-		}
-	}
+pub fn get_audit_processor() -> &'static Box<dyn AuditProcessor> {
+    unsafe {
+        if AUDIT_PROCESSOR.is_none() {
+            set_audit_processor(AnywaysAuditProcessor::default());
+        }
+        AUDIT_PROCESSOR.as_ref().unwrap()
+    }
 }
