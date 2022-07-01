@@ -1,18 +1,16 @@
-pub mod file;
-pub mod entry;
-
-use std::{fmt};
-use std::fmt::{Formatter, Write};
 use owo_colors::{DynColors, OwoColorize};
+use std::fmt;
+use std::fmt::{Formatter, Write};
 
 use crate::audit::{AuditSection, AuditSectionEntry};
 
-pub trait AuditFormatter: Sync  {
+pub trait AuditFormatter: Sync {
     fn format(&self, f: &mut Formatter, sections: &[AuditSection]) -> fmt::Result;
 }
 
 pub struct AnywaysAuditFormatter {
     pub width: u32,
+    pub side_padding: u32,
 }
 
 impl AuditFormatter for AnywaysAuditFormatter {
@@ -25,6 +23,7 @@ impl Default for AnywaysAuditFormatter {
     fn default() -> Self {
         AnywaysAuditFormatter {
             width: 120,
+            side_padding: 1,
         }
     }
 }
@@ -53,11 +52,11 @@ impl AnywaysAuditFormatter {
             write!(&mut text, "{}{}", create_pad(" ", left, 8), left)?;
         }
 
-        if entry.prefix_left.is_some() || entry.prefix_right.is_some()  {
+        if entry.prefix_left.is_some() || entry.prefix_right.is_some() {
             if entry.suffix.is_some() {
                 write!(&mut text, " {} ", "+".color(color).bold())?;
             } else {
-                write!(&mut text, " {} ", "|".white())?;
+                write!(&mut text, " {} ", entry.separator.to_string().white())?;
             }
         }
 
@@ -68,7 +67,7 @@ impl AnywaysAuditFormatter {
         write!(&mut text, "{}", entry.text)?;
 
         // TODO make this less cringe
-        let content_width = self.width as usize - 4;
+        let content_width = self.width as usize - (self.side_padding as usize * 2) - 2;
         if get_length(&text) > content_width {
             let mut line = String::new();
             let mut suffix = entry.suffix.as_deref();
@@ -82,16 +81,21 @@ impl AnywaysAuditFormatter {
             }
 
             if !line.is_empty() {
-                self.write_section_line(f, &line, suffix.take(),color)?;
+                self.write_section_line(f, &line, suffix.take(), color)?;
             }
         } else {
-            self.write_section_line(f, &text, entry.suffix.as_deref(),color)?;
+            self.write_section_line(f, &text, entry.suffix.as_deref(), color)?;
         }
 
         Ok(())
     }
 
-    fn write_section_header(&self, f: &mut Formatter<'_>, text: &str, color: DynColors) -> fmt::Result {
+    fn write_section_header(
+        &self,
+        f: &mut Formatter<'_>,
+        text: &str,
+        color: DynColors,
+    ) -> fmt::Result {
         writeln!(
             f,
             "{}{} {}{}",
@@ -102,20 +106,35 @@ impl AnywaysAuditFormatter {
         )
     }
 
-    fn write_section_line(&self, f: &mut Formatter<'_>, text: &str, suffix: Option<&str>, color: DynColors) -> fmt::Result {
+    fn write_section_line(
+        &self,
+        f: &mut Formatter<'_>,
+        text: &str,
+        suffix: Option<&str>,
+        color: DynColors,
+    ) -> fmt::Result {
         let suffix = suffix.unwrap_or("");
 
-        let ls = "│ ".color(color).to_string();
+        let ls = "│".color(color).to_string();
         let rs = if suffix.is_empty() {
-            " │".color(color).to_string()
+            "│".color(color).to_string()
         } else {
-            " +│".color(color).bold().to_string()
+            "+│".color(color).bold().to_string()
         };
+        let pad = " ".repeat(self.side_padding as usize);
 
         writeln!(
             f,
-            "{ls}{text}{}{suffix}{rs}",
-            create_pad(" ", text, self.width as usize - get_length(&ls) - get_length(&rs) - get_length(suffix))
+            "{ls}{pad}{text}{}{suffix}{pad}{rs}",
+            create_pad(
+                " ",
+                text,
+                self.width as usize
+                    - get_length(&ls)
+                    - get_length(&rs)
+                    - get_length(suffix)
+                    - self.side_padding as usize * 2
+            )
         )
     }
 
@@ -131,8 +150,7 @@ impl AnywaysAuditFormatter {
 }
 
 pub fn create_pad(value: &str, text: &str, length: usize) -> String {
-    value
-        .repeat(length.saturating_sub(get_length(text)))
+    value.repeat(length.saturating_sub(get_length(text)))
 }
 
 pub fn get_length(text: &str) -> usize {

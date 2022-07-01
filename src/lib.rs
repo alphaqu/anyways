@@ -10,9 +10,10 @@
 //! 1. Audit gets made
 //! 2. The AuditProcessor removes useless information and makes the information more digestible
 //! 3. The AuditFormatter formats the audit sections to the output.
+use owo_colors::{Style};
 use crate::audit::Audit;
 use crate::formatter::{AnywaysAuditFormatter, AuditFormatter};
-use crate::processor::{AnywaysAuditProcessor, AuditProcessor};
+use crate::processor::{AnywaysAuditProcessorBuilder, AuditProcessor};
 
 pub mod audit;
 pub mod ext;
@@ -48,7 +49,15 @@ pub fn get_audit_formatter() -> &'static dyn AuditFormatter {
 pub fn get_audit_processor() -> &'static dyn AuditProcessor {
     unsafe {
         if AUDIT_PROCESSOR.is_none() {
-            set_audit_processor(AnywaysAuditProcessor::default());
+            set_audit_processor(AnywaysAuditProcessorBuilder{
+                shorten_result: true,
+                shorten_box: true,
+                shorten_closure: true,
+                shorten_try_from: true,
+                collapse_try_from: true,
+                collapse_closure: true,
+                replace_style: Style::new().cyan()
+            }.build());
         }
         AUDIT_PROCESSOR.as_deref().unwrap()
     }
@@ -57,7 +66,7 @@ pub fn get_audit_processor() -> &'static dyn AuditProcessor {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use backtrace::{BacktraceFrame, resolve_frame};
+
     use crate::ext::AuditExt;
     use crate::Result;
 
@@ -78,7 +87,7 @@ mod tests {
     }
 
     fn read_plugin() -> Result<()> {
-        File::open("./your mom is very gay").wrap_err_with(|| "Failed to read file")?;
+        File::open("./your mom is very gay")?;
 
         Ok(())
     }

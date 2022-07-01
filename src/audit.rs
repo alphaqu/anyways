@@ -133,27 +133,39 @@ impl AuditSection {
 /// Here is an example of difference scenarios of its padding
 /// ```md
 /// ╭── Section ─────────────────────────────────────────────────────╮
-/// │ e.prefix_left | e.prefix_right      e.text            e.suffix │
+/// │ e.prefix_left + e.prefix_right      e.text           e.suffix +│
 /// │ e.prefix_left |                     e.text                     │
-/// │               | e.prefix_right      e.text            e.suffix │
+/// │               + e.prefix_right      e.text           e.suffix +│
 /// │ e.text                                                         │
+/// │            -> ^ <- separator                                   │
 /// ╰────────────────────────────────────────────────────────────────╯
 /// ```
 #[derive(Clone)]
 pub struct AuditSectionEntry {
 	pub prefix_left: Option<String>,
+	pub separator: char,
 	pub prefix_right: Option<String>,
 	pub text: String,
 	pub suffix: Option<String>,
 }
 
 impl AuditSectionEntry {
+	pub fn empty() -> AuditSectionEntry {
+		AuditSectionEntry {
+			prefix_left: None,
+			separator: '|',
+			prefix_right: None,
+			text: "".to_string(),
+			suffix: None
+		}
+	}
 	pub fn text(text: String) -> AuditSectionEntry {
 		AuditSectionEntry {
 			prefix_left: None,
+			separator: '|',
 			prefix_right: None,
 			text,
-			suffix: None
+			suffix: None,
 		}
 	}
 }

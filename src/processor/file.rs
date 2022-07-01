@@ -1,14 +1,14 @@
 use std::env;
 use std::path::{Component, PathBuf};
-use crate::formatter::entry::ReporterEntry;
+use crate::processor::entry::ProcessingEntry;
 
 pub struct ReporterFile {
 	pub path: Option<PathBuf>,
-	pub entries: Vec<ReporterEntry>,
+	pub entries: Vec<ProcessingEntry>,
 }
 
 impl ReporterFile {
-	pub fn new(mut path: Option<PathBuf>, entries: Vec<ReporterEntry>) -> ReporterFile {
+	pub fn new(mut path: Option<PathBuf>, entries: Vec<ProcessingEntry>) -> ReporterFile {
 		if let Some(path) = &mut path {
 			// If possible make absolute path relative
 			if let Ok(current_dir) = env::current_dir() {

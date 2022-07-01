@@ -1,41 +1,140 @@
-use crate::audit::{Audit, AuditSection, AuditSectionEntry};
-use crate::formatter::entry::ReporterEntry;
-use crate::formatter::file::ReporterFile;
-use backtrace::{resolve_frame, BacktraceSymbol, Symbol};
-use owo_colors::{AnsiColors, DynColors, OwoColorize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem::swap;
 use std::path::PathBuf;
 
-const UNKNOWN: fn() -> String = || "???".to_string();
+use backtrace::{resolve_frame, BacktraceSymbol, Symbol};
+use owo_colors::{AnsiColors, DynColors, OwoColorize, Style};
+
+use entry::{ProcessingEntry, ProcessingValueMatcher};
+use file::ReporterFile;
+
+use crate::audit::{Audit, AuditSection, AuditSectionEntry};
+
+pub mod entry;
+pub mod file;
+
+pub(crate) const UNKNOWN: fn() -> String = || "???".to_string();
 
 pub trait AuditProcessor: Sync {
     /// This processes the audit which later gets formatted by an AuditReporter
     fn process(&self, audit: &Audit) -> Vec<AuditSection>;
 }
 
-pub struct AnywaysAuditProcessor {
-    pub filtered: HashSet<String>,
-    pub filtered_crates: HashSet<String>,
-    pub collapsable: HashSet<String>,
+pub struct AnywaysAuditProcessorBuilder {
+    pub shorten_result: bool,
+    pub shorten_box: bool,
+    pub shorten_closure: bool,
+    pub shorten_try_from: bool,
+
+    pub collapse_try_from: bool,
+    pub collapse_closure: bool,
+
+    pub replace_style: Style,
 }
 
-impl Default for AnywaysAuditProcessor {
-    fn default() -> Self {
+impl AnywaysAuditProcessorBuilder {
+    pub fn build(self) -> AnywaysAuditProcessor {
+        let filter = HashSet::new();
+        let mut shorthands = Vec::new();
+        let mut collapse = HashSet::new();
+
+        if self.shorten_result {
+            shorthands.push((
+                ProcessingValueMatcher::Item("result::Result<T,E>".to_string()),
+                "result".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Item("result::Result<T,F>".to_string()),
+                "result".to_string(),
+            ));
+        }
+
+        if self.shorten_box {
+            shorthands.push((
+                ProcessingValueMatcher::Item("boxed::Box<F,A>".to_string()),
+                "box".to_string(),
+            ));
+        }
+
+        if self.shorten_closure {
+            shorthands.push((
+                ProcessingValueMatcher::Value("ops::function::FnOnce<Args>::call_once".to_string()),
+                "closure()".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Value("ops::function::FnOnce<()>::call_once".to_string()),
+                "closure()".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Value("ops::function::FnOnce::call_once".to_string()),
+                "closure()".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Item("ops::function::FnOnce<Args>".to_string()),
+                "closure".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Item("ops::function::FnOnce<()>".to_string()),
+                "closure".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Item("ops::function::FnOnce".to_string()),
+                "closure".to_string(),
+            ));
+            shorthands.push((
+                ProcessingValueMatcher::Path("{{closure}}".to_string()),
+                "closure".to_string(),
+            ));
+        }
+
+        if self.shorten_try_from {
+            shorthands.push((
+                ProcessingValueMatcher::Value("convert::From<E>::from".to_string()),
+                "from".to_string(),
+            ));
+            shorthands.push((ProcessingValueMatcher::Value("ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>::from_residual".to_string()), "try".to_string(), ));
+        }
+
+        if self.collapse_try_from {
+            collapse.insert(ProcessingValueMatcher::Value(
+                "ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>::from_residual".to_string(),
+            ));
+        }
+
+        if self.collapse_closure {
+            collapse.insert(ProcessingValueMatcher::Item(
+                "ops::function::FnOnce::call_once".to_string(),
+            ));
+        }
+
         AnywaysAuditProcessor {
-            filtered: HashSet::from([
-                "panic::unwind_safe::AssertUnwindSafe<F> -> |fn|.call()".to_string(),
-                "panicking::try::do_call".to_string(),
-                "panicking::try".to_string(),
-                "panic::catch_unwind".to_string(),
-            ]),
-            filtered_crates: HashSet::from([
-              //  "anyways".to_string()
-            ]),
-            collapsable: HashSet::from(["|fn|()".to_string(), "try?".to_string()]),
+            filter,
+            replace: shorthands,
+            collapse,
+            replace_style: self.replace_style,
+            file_remove_library_prefix: false,
+            file_shorten_current_dir: false,
         }
     }
+}
+
+pub struct AnywaysAuditProcessor {
+    /// If a filter gets matched the entry will get removed
+    pub filter: HashSet<ProcessingValueMatcher>,
+
+    /// If a shorthand get matched the entry will get replaced with the right side and colored on its default.
+    /// You can locally overwrite this by just setting a color.
+    pub replace: Vec<(ProcessingValueMatcher, String)>,
+    pub replace_style: Style,
+
+    /// If a collapse gets matched the entry will be allowed to move outside of its file and inline its usage.
+    pub collapse: HashSet<ProcessingValueMatcher>,
+
+    /// Removes /rustc/hashisreallycoolhere/library prefix which is present in every library
+    pub file_remove_library_prefix: bool,
+    /// If the source file is bound to the current directory it will get shortened to ./
+    pub file_shorten_current_dir: bool,
 }
 
 impl AuditProcessor for AnywaysAuditProcessor {
@@ -54,6 +153,8 @@ impl AnywaysAuditProcessor {
         let mut errors = HashMap::new();
         let mut entries = Vec::new();
         for (i, err) in audit.errors.iter().enumerate() {
+            // Try to resolve the location and append that to the errors lookup.
+            // This is later used to indicate where an error has occured in the backtrace.
             if let Some(value) = &err.location {
                 resolve_frame(value, |symbol| {
                     let location: ErrorLocationKey = symbol.into();
@@ -63,20 +164,15 @@ impl AnywaysAuditProcessor {
                     errors.get_mut(&location).unwrap().push(i);
                 });
             }
+
+            // Push the section entry.
             entries.push(AuditSectionEntry {
-                prefix_left: Some(
-                    format!(
-                        "E{i} {}",
-                        if i != audit.errors.len() - 1 {
-                            "↓"
-                        } else {
-                            "→"
-                        }
-                        .white()
-                    )
-                    .red()
-                    .to_string(),
-                ),
+                prefix_left: Some(format!("E{i}").red().to_string()),
+                separator: if i != audit.errors.len() - 1 {
+                    '↓'
+                } else {
+                    '→'
+                },
                 prefix_right: None,
                 text: format!("{}", err.error),
                 suffix: None,
@@ -94,50 +190,71 @@ impl AnywaysAuditProcessor {
     }
 
     pub fn create_backtrace_section(&self, audit: &Audit, errors: &Errors) -> AuditSection {
-        let mut files = self.read_backtrace(audit, errors);
-        self.remove_audit_creation(&mut files);
-        self.filter(&mut files);
-        self.cleanup(&mut files);
-        self.colorize(&mut files);
+        // Apply filter on entries.
+        let mut files: Vec<ReporterFile> = Vec::new();
+        for mut file in self.read_backtrace(audit, errors) {
+            let mut entries = Vec::new();
+            'entry: for mut entry in file.entries {
+                // If any filter matches skip this entry
+                for matcher in &self.filter {
+                    if entry.value.matches(matcher) {
+                        continue 'entry;
+                    }
+                }
+
+                // Check if this entry is collapsable
+                for matcher in &self.collapse {
+                    if entry.value.matches(matcher) {
+                        entry.collapsable = true;
+                        break;
+                    }
+                }
+
+                // Replace everything you can.
+                for (matcher, to) in &self.replace {
+                    entry
+                        .value
+                        .replace(matcher, &(to.style(self.replace_style).to_string()));
+                }
+
+                entries.push(entry);
+            }
+
+            // If the entries is empty do not append the file
+            if entries.is_empty() {
+                continue;
+            }
+
+            // If all of the entries are collapsable you can append the entries to the previous file.
+            if let Some(last) = files.last_mut() {
+                if last.path == file.path || entries.iter().all(|v| v.collapsable) {
+                    for entry in entries {
+                        last.entries.push(entry);
+                    }
+                    continue;
+                }
+            }
+
+            file.entries = entries;
+            files.push(file);
+        }
 
         let mut entries = Vec::new();
         for file in files {
-            entries.push(AuditSectionEntry {
-                prefix_left: None,
-                prefix_right: None,
-                text: file
-                    .path
+            // File name
+            entries.push(AuditSectionEntry::text(
+                file.path
                     .map(|p| p.to_str().unwrap().white().bold().to_string())
                     .unwrap_or_else(UNKNOWN),
-                suffix: None,
-            });
+            ));
 
+            // File entries
             for entry in file.entries {
-                entries.push(AuditSectionEntry {
-                    prefix_left: Some(
-                        format!(
-                            "{}:{}",
-                            entry.line.map(|v| v.to_string()).unwrap_or_else(UNKNOWN),
-                            entry
-                                .character
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(UNKNOWN)
-                        )
-                        .blue()
-                        .to_string(),
-                    ),
-                    prefix_right: entry.module.map(|v| v.purple().to_string()),
-                    text: entry.value.unwrap_or_else(UNKNOWN),
-                    suffix: entry.suffix,
-                });
+                entries.push(entry.build());
             }
 
-            entries.push(AuditSectionEntry {
-                prefix_left: None,
-                prefix_right: None,
-                text: "".to_string(),
-                suffix: None,
-            });
+            // Just a spacer after the files
+            entries.push(AuditSectionEntry::empty());
         }
         // pop last empty line ^
         entries.pop();
@@ -151,162 +268,32 @@ impl AnywaysAuditProcessor {
 
     fn read_backtrace(&self, audit: &Audit, errors: &Errors) -> Vec<ReporterFile> {
         let mut backtrace = audit.backtrace.clone();
+        // Make sure that the backtrace is resolved.
+        // We need to sadly clone the backtrace as we do not have a mutable reference in here to resolve the backtrace,
+        // which leaves opportunity for other Audits to also resolve their backtrace.
+        // However Audits are mostly only reported once so ¯\_(ツ)_/¯
         backtrace.resolve();
+
         let mut files = Vec::new();
-
-        let mut old_path = None;
         let mut entries = Vec::new();
+        let mut old_path = None;
+
         for frame in backtrace.frames() {
-            for symbols in frame.symbols() {
-                let symbol: ErrorLocationKey = symbols.into();
+            for symbol in frame.symbols() {
+                let location: ErrorLocationKey = symbol.into();
 
-                let mut suffix = None;
-                if let Some(err) = errors.get(&symbol) {
-                    let errors: Vec<String> = err
-                        .iter()
-                        .map(|id| {
-                            format!("E{id}").red().to_string()
-                        })
-                        .collect();
-
-                    suffix = Some(format!(
-                        "{arrow} {errors}",
-                        arrow = "".white(),
-                        errors = errors.join(&" ".white().to_string()),
-                    ));
-                }
-
-                if old_path != symbol.filename {
+                if old_path != location.filename {
                     let mut values = Vec::new();
                     swap(&mut values, &mut entries);
                     files.push(ReporterFile::new(old_path, values));
-                    old_path = symbol.filename;
+                    old_path = location.filename.clone();
                 }
 
-                entries.push(ReporterEntry::new(
-                    old_path.as_ref(),
-                    symbols.lineno(),
-                    symbols.colno(),
-                    symbols.name().map(|v| {
-                        format!("{v}")
-                    }),
-                    suffix,
-                ));
+                entries.push(ProcessingEntry::new(symbol, errors));
             }
         }
 
         files
-    }
-
-    fn filter(&self, files: &mut Vec<ReporterFile>) {
-        let mut out = Vec::new();
-        for file in files.drain(..) {
-            let mut entries = Vec::new();
-            for entry in file.entries {
-                if let Some(value) = entry.module.as_deref() {
-                    if self.filtered_crates.contains(value) {
-                        continue;
-                    }
-                }
-
-                if let Some(value) = entry.value.as_deref() {
-                    if self.filtered.contains(value) {
-                        continue;
-                    }
-                }
-                entries.push(entry);
-            }
-            out.push(ReporterFile {
-                path: file.path,
-                entries,
-            })
-        }
-
-        *files = out;
-    }
-
-    fn remove_audit_creation(&self, files: &mut [ReporterFile]) {
-        self.try_remove(files, "audit::Audit::new_empty");
-        self.try_remove(files, "audit::Audit::new");
-        if self.try_remove(
-            files,
-            "result::Result<T,E> -> anyways::ext::AuditExt<T>::wrap",
-        ) {
-            self.try_remove(files, "ext::AuditExt::wrap_err");
-            self.try_remove(files, "ext::AuditExt::wrap_err_with");
-            self.try_remove(files, "ext::AuditExt::wrap_section");
-            self.try_remove(files, "ext::AuditExt::wrap_section_with");
-        } else if self.try_remove(files, "audit::Audit -> core::convert::From<E>::from") {
-            self.try_remove(files, "result::Result<T,F> -> core::ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>::from_residual");
-        }
-    }
-
-    fn try_remove(&self, files: &mut [ReporterFile], target: &str) -> bool {
-        for file in files {
-            if let Some(entry) = file.entries.get(0) {
-                let mut remove = false;
-                if let Some(value) = entry.value.as_deref() {
-                    if value == target {
-                        remove = true;
-                    }
-                }
-
-                return if remove {
-                    file.entries.remove(0);
-                    true
-                } else {
-                    false
-                };
-            }
-        }
-
-        false
-    }
-
-    fn cleanup(&self, files: &mut Vec<ReporterFile>) {
-        let mut out: Vec<ReporterFile> = Vec::new();
-        for file in files.drain(..) {
-            if file.entries.is_empty() {
-                continue;
-            }
-
-            let mut collapsable = 0;
-            for entry in &file.entries {
-                if let Some(value) = entry.value.as_deref() {
-                    if self.collapsable.contains(value) {
-                        collapsable += 1;
-                    }
-                }
-            }
-
-            if let Some(last) = out.last_mut() {
-                if collapsable == file.entries.len() || last.path == file.path {
-                    for entry in file.entries {
-                        last.entries.push(entry);
-                    }
-                    continue;
-                }
-            }
-
-            out.push(file);
-        }
-        *files = out;
-    }
-
-    fn colorize(&self, files: &mut Vec<ReporterFile>) {
-        for file in files {
-            for entry in &mut file.entries {
-                if let Some(value) = &mut entry.value {
-                    *value = value.replace("|fn|", &"|fn|".green().to_string());
-                    *value = value.replace(".call()", &".call()".green().to_string());
-                    *value = value.replace("try?", &"try?".green().to_string());
-
-                    *value = value.replace("->", &"->".white().to_string());
-
-                    *value = value.replace("box", &"box".red().to_string());
-                }
-            }
-        }
     }
 }
 
