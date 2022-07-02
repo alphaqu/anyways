@@ -30,70 +30,88 @@ pub struct AnywaysAuditProcessorBuilder {
     pub collapse_try_from: bool,
     pub collapse_closure: bool,
 
+    pub file_remove_library_prefix: bool,
+    pub file_shorten_current_dir: bool,
     pub replace_style: Style,
+}
+
+impl Default for AnywaysAuditProcessorBuilder {
+    fn default() -> Self {
+        AnywaysAuditProcessorBuilder {
+            shorten_result: true,
+            shorten_box: true,
+            shorten_closure: true,
+            shorten_try_from: true,
+            collapse_try_from: true,
+            collapse_closure: true,
+            file_remove_library_prefix: true,
+            file_shorten_current_dir: true,
+            replace_style: Style::new().cyan()
+        }
+    }
 }
 
 impl AnywaysAuditProcessorBuilder {
     pub fn build(self) -> AnywaysAuditProcessor {
         let filter = HashSet::new();
-        let mut shorthands = Vec::new();
+        let mut replace = Vec::new();
         let mut collapse = HashSet::new();
 
         if self.shorten_result {
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("result::Result<T,E>".to_string()),
                 "result".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("result::Result<T,F>".to_string()),
                 "result".to_string(),
             ));
         }
 
         if self.shorten_box {
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("boxed::Box<F,A>".to_string()),
                 "box".to_string(),
             ));
         }
 
         if self.shorten_closure {
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Value("ops::function::FnOnce<Args>::call_once".to_string()),
                 "closure()".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Value("ops::function::FnOnce<()>::call_once".to_string()),
                 "closure()".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Value("ops::function::FnOnce::call_once".to_string()),
                 "closure()".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("ops::function::FnOnce<Args>".to_string()),
                 "closure".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("ops::function::FnOnce<()>".to_string()),
                 "closure".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Item("ops::function::FnOnce".to_string()),
                 "closure".to_string(),
             ));
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Path("{{closure}}".to_string()),
                 "closure".to_string(),
             ));
         }
 
         if self.shorten_try_from {
-            shorthands.push((
+            replace.push((
                 ProcessingValueMatcher::Value("convert::From<E>::from".to_string()),
                 "from".to_string(),
             ));
-            shorthands.push((ProcessingValueMatcher::Value("ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>::from_residual".to_string()), "try".to_string(), ));
+            replace.push((ProcessingValueMatcher::Value("ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>::from_residual".to_string()), "try".to_string(), ));
         }
 
         if self.collapse_try_from {
@@ -110,11 +128,11 @@ impl AnywaysAuditProcessorBuilder {
 
         AnywaysAuditProcessor {
             filter,
-            replace: shorthands,
+            replace,
             collapse,
             replace_style: self.replace_style,
-            file_remove_library_prefix: false,
-            file_shorten_current_dir: false,
+            file_remove_library_prefix: self.file_remove_library_prefix,
+            file_shorten_current_dir: self.file_shorten_current_dir,
         }
     }
 }
@@ -167,6 +185,7 @@ impl AnywaysAuditProcessor {
 
             // Push the section entry.
             entries.push(AuditSectionEntry {
+                prefix: None,
                 prefix_left: Some(format!("E{i}").red().to_string()),
                 separator: if i != audit.errors.len() - 1 {
                     '↓'
@@ -285,7 +304,7 @@ impl AnywaysAuditProcessor {
                 if old_path != location.filename {
                     let mut values = Vec::new();
                     swap(&mut values, &mut entries);
-                    files.push(ReporterFile::new(old_path, values));
+                    files.push(ReporterFile::new(old_path, values, self.file_remove_library_prefix, self.file_shorten_current_dir));
                     old_path = location.filename.clone();
                 }
 

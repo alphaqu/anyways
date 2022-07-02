@@ -11,6 +11,7 @@ pub trait AuditFormatter: Sync {
 pub struct AnywaysAuditFormatter {
     pub width: u32,
     pub side_padding: u32,
+    pub simple_section: bool,
 }
 
 impl AuditFormatter for AnywaysAuditFormatter {
@@ -24,6 +25,7 @@ impl Default for AnywaysAuditFormatter {
         AnywaysAuditFormatter {
             width: 120,
             side_padding: 1,
+            simple_section: false,
         }
     }
 }
@@ -53,7 +55,7 @@ impl AnywaysAuditFormatter {
         }
 
         if entry.prefix_left.is_some() || entry.prefix_right.is_some() {
-            if entry.suffix.is_some() {
+            if entry.suffix.is_some() | entry.prefix.is_some() {
                 write!(&mut text, " {} ", "+".color(color).bold())?;
             } else {
                 write!(&mut text, " {} ", entry.separator.to_string().white())?;
@@ -71,20 +73,21 @@ impl AnywaysAuditFormatter {
         if get_length(&text) > content_width {
             let mut line = String::new();
             let mut suffix = entry.suffix.as_deref();
+            let mut prefix = entry.prefix.as_deref();
             for ch in text.chars() {
                 line.push(ch);
                 let length = suffix.map(get_length).unwrap_or(0) + get_length(&line);
                 if length == content_width {
-                    self.write_section_line(f, &line, suffix.take(), color)?;
+                    self.write_section_line(f, &line, suffix.take(), prefix.take(), color)?;
                     line.clear();
                 }
             }
 
             if !line.is_empty() {
-                self.write_section_line(f, &line, suffix.take(), color)?;
+                self.write_section_line(f, &line, suffix.take(), prefix.take(), color)?;
             }
         } else {
-            self.write_section_line(f, &text, entry.suffix.as_deref(), color)?;
+            self.write_section_line(f, &text, entry.suffix.as_deref(), entry.prefix.as_deref(), color)?;
         }
 
         Ok(())
@@ -96,14 +99,18 @@ impl AnywaysAuditFormatter {
         text: &str,
         color: DynColors,
     ) -> fmt::Result {
-        writeln!(
-            f,
-            "{}{} {}{}",
-            "╭── ".color(color),
-            text.bold(),
-            create_pad(&"─".color(color).to_string(), text, self.width as usize - 6),
-            "╮".color(color)
-        )
+        if self.simple_section {
+            writeln!(f, "{}{}", "==> ".color(color), text.bold(),)
+        } else {
+            writeln!(
+                f,
+                "{}{} {}{}",
+                "╭── ".color(color),
+                text.bold(),
+                create_pad(&"─".color(color).to_string(), text, self.width as usize - 6),
+                "╮".color(color)
+            )
+        }
     }
 
     fn write_section_line(
@@ -111,48 +118,59 @@ impl AnywaysAuditFormatter {
         f: &mut Formatter<'_>,
         text: &str,
         suffix: Option<&str>,
+        prefix: Option<&str>,
         color: DynColors,
     ) -> fmt::Result {
-        let suffix = suffix.unwrap_or("");
+        let suffix = suffix.unwrap_or_default();
+        let prefix = prefix.unwrap_or_default();
+        let ls = if self.simple_section { "" } else { "│" }
+            .color(color)
+            .to_string();
 
-        let ls = "│".color(color).to_string();
-        let rs = if suffix.is_empty() {
-            "│".color(color).to_string()
-        } else {
-            "+│".color(color).bold().to_string()
-        };
-        let pad = " ".repeat(self.side_padding as usize);
-
-        writeln!(
-            f,
-            "{ls}{pad}{text}{}{suffix}{pad}{rs}",
-            create_pad(
-                " ",
-                text,
-                self.width as usize
-                    - get_length(&ls)
-                    - get_length(&rs)
-                    - get_length(suffix)
-                    - self.side_padding as usize * 2
+        if !self.simple_section {
+            let pad = " ".repeat(self.side_padding as usize);
+            let prefix_pad = create_pad(" ", prefix, 3);
+            writeln!(
+                f,
+                "{ls}{pad}{prefix}{prefix_pad}{text}{}{suffix}{pad}{ls}",
+                create_pad(
+                    " ",
+                    text,
+                    self.width as usize
+                        - get_length(&ls)
+                        - get_length(&ls)
+                        - get_length(&prefix_pad)
+                        - get_length(suffix)
+                        - get_length(prefix)
+                        - self.side_padding as usize * 2,
+                )
             )
-        )
+        } else {
+            writeln!(f, "{}{suffix}{text}", create_pad(" ", suffix, 4))
+        }
     }
 
     fn write_section_footer(&self, f: &mut Formatter<'_>, color: DynColors) -> fmt::Result {
-        writeln!(
-            f,
-            "{}{}{}",
-            "╰".color(color),
-            "─".color(color).to_string().repeat(self.width as usize - 2),
-            "╯".color(color)
-        )
+        if !self.simple_section {
+            writeln!(
+                f,
+                "{}{}{}",
+                "╰".color(color),
+                "─".color(color).to_string().repeat(self.width as usize - 2),
+                "╯".color(color)
+            )
+        } else {
+            writeln!(f)
+        }
     }
 }
 
+// Repeats the value until it can pad the text
 pub fn create_pad(value: &str, text: &str, length: usize) -> String {
     value.repeat(length.saturating_sub(get_length(text)))
 }
 
+// Get length of a string skipping all ansi color codes.
 pub fn get_length(text: &str) -> usize {
     let mut wait_m = false;
     let mut len = 0;

@@ -7,7 +7,7 @@ pub struct ProcessingEntry {
     pub line: Option<u32>,
     pub character: Option<u32>,
     pub value: ProcessingValue,
-    pub suffix: Option<String>,
+    pub errors: Option<String>,
 
     pub collapsable: bool,
 }
@@ -36,10 +36,11 @@ impl ProcessingEntry {
 
         AuditSectionEntry {
             prefix_left: Some(self.get_location()),
+            prefix: self.errors,
             separator: '|',
             prefix_right: self.value.get_module().map(|v| v.purple().to_string()),
             text: value,
-            suffix: self.suffix,
+            suffix: None,
         }
     }
 }
@@ -200,24 +201,20 @@ impl ProcessingEntry {
             .map(|v| Self::acquire_value(Self::strip_hash(&v.to_string())))
             .unwrap_or(ProcessingValue::Unknown);
 
-        let suffix = errors.get(&symbol.into()).map(|err| {
+        let errors = errors.get(&symbol.into()).map(|err| {
             let errors: Vec<String> = err
                 .iter()
                 .map(|id| format!("E{id}").red().to_string())
                 .collect();
 
-            format!(
-                "{arrow} {errors}",
-                arrow = "".white(),
-                errors = errors.join(&" ".white().to_string()),
-            )
+            errors.join(" ")
         });
 
         ProcessingEntry {
             line: symbol.lineno(),
             character: symbol.colno(),
             value,
-            suffix,
+            errors,
             collapsable: false,
         }
     }

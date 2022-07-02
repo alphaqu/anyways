@@ -65,8 +65,7 @@ impl Audit {
 impl<E: Into<AuditError>> From<E> for Audit {
 	fn from(error: E) -> Self {
 		let mut err: AuditError = error.into();
-		let option = get_caller(0);
-		err.location = option;
+		err.location = get_caller(2);
 		Audit::new(err)
 	}
 }
@@ -142,6 +141,8 @@ impl AuditSection {
 /// ```
 #[derive(Clone)]
 pub struct AuditSectionEntry {
+	pub prefix: Option<String>,
+
 	pub prefix_left: Option<String>,
 	pub separator: char,
 	pub prefix_right: Option<String>,
@@ -152,6 +153,7 @@ pub struct AuditSectionEntry {
 impl AuditSectionEntry {
 	pub fn empty() -> AuditSectionEntry {
 		AuditSectionEntry {
+			prefix: None,
 			prefix_left: None,
 			separator: '|',
 			prefix_right: None,
@@ -161,6 +163,7 @@ impl AuditSectionEntry {
 	}
 	pub fn text(text: String) -> AuditSectionEntry {
 		AuditSectionEntry {
+			prefix: None,
 			prefix_left: None,
 			separator: '|',
 			prefix_right: None,
