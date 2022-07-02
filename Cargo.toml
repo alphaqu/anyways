@@ -2,8 +2,19 @@
 name = "anyways"
 version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+readme = "README.md"
+
+description = "An alternative dynamic error handling library"
+keywords = ["error", "library"]
+
+repository = "https://github.com/alphaqu/anyways"
+homepage = "https://github.com/alphaqu/anyways"
+authors = ["notequalalpha"]
+exclude = [
+    ".idea/*",
+]
 
 [dependencies]
 backtrace = "0.3.65"
