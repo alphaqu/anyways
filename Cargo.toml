@@ -3,6 +3,7 @@ name = "anyways"
 version = "0.1.0"
 edition = "2021"
 license-file = "LICENSE"
+licence = "MIT"
 
 readme = "README.md"
 
