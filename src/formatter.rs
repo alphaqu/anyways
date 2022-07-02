@@ -3,15 +3,23 @@ use std::fmt;
 use std::fmt::{Formatter, Write};
 
 use crate::audit::{AuditSection, AuditSectionEntry};
+use crate::align::{align, Alignment, PaddingEntry};
 
 pub trait AuditFormatter: Sync {
     fn format(&self, f: &mut Formatter, sections: &[AuditSection]) -> fmt::Result;
 }
 
 pub struct AnywaysAuditFormatter {
+    /// The total width of the section
     pub width: u32,
+    /// The amount of padding on both sides of the section entries.
     pub side_padding: u32,
+    /// If the section should be in a simplified view
     pub simple_section: bool,
+
+    pub prefix_padding: usize,
+    pub prefix_left_padding: usize,
+    pub prefix_right_padding: usize,
 }
 
 impl AuditFormatter for AnywaysAuditFormatter {
@@ -26,6 +34,9 @@ impl Default for AnywaysAuditFormatter {
             width: 120,
             side_padding: 1,
             simple_section: false,
+            prefix_padding: 3,
+            prefix_left_padding: 8,
+            prefix_right_padding: 12
         }
     }
 }
@@ -49,47 +60,58 @@ impl AnywaysAuditFormatter {
         entry: &AuditSectionEntry,
         color: DynColors,
     ) -> fmt::Result {
-        let mut text = String::new();
-        if let Some(left) = &entry.prefix_left {
-            write!(&mut text, "{}{}", create_pad(" ", left, 8), left)?;
-        }
+        let mut entries = Vec::new();
+        // Prefix
+        entries.push(PaddingEntry {
+            text: entry.prefix.as_deref().unwrap_or("").to_string(),
+            width: 3,
+            alignment: Alignment::Left,
+        });
 
+
+        // Prefix Left
+        if let Some(value) = &entry.prefix_left {
+            entries.push(PaddingEntry {
+                text: value.clone(),
+                width: 8,
+                alignment: Alignment::Right,
+            });
+        }
+        // Prefix Separator
         if entry.prefix_left.is_some() || entry.prefix_right.is_some() {
-            if entry.suffix.is_some() | entry.prefix.is_some() {
-                write!(&mut text, " {} ", "+".color(color).bold())?;
-            } else {
-                write!(&mut text, " {} ", entry.separator.to_string().white())?;
-            }
+            entries.push(PaddingEntry {
+                text: {
+                    entry.separator.white().to_string()
+                },
+                width: 3,
+                alignment: Alignment::Center,
+            });
         }
 
-        if let Some(right) = &entry.prefix_right {
-            write!(&mut text, "{}{}", right, create_pad(" ", right, 10))?;
+        // Prefix Right
+        if let Some(value) = &entry.prefix_right {
+            entries.push(PaddingEntry {
+                text: value.clone(),
+                width: 10,
+                alignment: Alignment::Left,
+            });
         }
 
-        write!(&mut text, "{}", entry.text)?;
 
-        // TODO make this less cringe
-        let content_width = self.width as usize - (self.side_padding as usize * 2) - 2;
-        if get_length(&text) > content_width {
-            let mut line = String::new();
-            let mut suffix = entry.suffix.as_deref();
-            let mut prefix = entry.prefix.as_deref();
-            for ch in text.chars() {
-                line.push(ch);
-                let length = suffix.map(get_length).unwrap_or(0) + get_length(&line);
-                if length == content_width {
-                    self.write_section_line(f, &line, suffix.take(), prefix.take(), color)?;
-                    line.clear();
-                }
-            }
+        // Text
+        entries.push(PaddingEntry {
+            text: entry.text.clone(),
+            width: 0,
+            alignment: Alignment::Left,
+        });
 
-            if !line.is_empty() {
-                self.write_section_line(f, &line, suffix.take(), prefix.take(), color)?;
-            }
-        } else {
-            self.write_section_line(f, &text, entry.suffix.as_deref(), entry.prefix.as_deref(), color)?;
-        }
-
+        let pad = " ".repeat(self.side_padding as usize);
+        let s = "│".color(color).to_string();
+        let max_width = 116;
+        align(&entries, max_width, ' ', |line| {
+            let mut fill = " ".repeat(max_width.saturating_sub(get_length(&line)));
+            writeln!(f, "{s}{pad}{line}{fill}{pad}{s}")
+        })?;
         Ok(())
     }
 
@@ -110,43 +132,6 @@ impl AnywaysAuditFormatter {
                 create_pad(&"─".color(color).to_string(), text, self.width as usize - 6),
                 "╮".color(color)
             )
-        }
-    }
-
-    fn write_section_line(
-        &self,
-        f: &mut Formatter<'_>,
-        text: &str,
-        suffix: Option<&str>,
-        prefix: Option<&str>,
-        color: DynColors,
-    ) -> fmt::Result {
-        let suffix = suffix.unwrap_or_default();
-        let prefix = prefix.unwrap_or_default();
-        let ls = if self.simple_section { "" } else { "│" }
-            .color(color)
-            .to_string();
-
-        if !self.simple_section {
-            let pad = " ".repeat(self.side_padding as usize);
-            let prefix_pad = create_pad(" ", prefix, 3);
-            writeln!(
-                f,
-                "{ls}{pad}{prefix}{prefix_pad}{text}{}{suffix}{pad}{ls}",
-                create_pad(
-                    " ",
-                    text,
-                    self.width as usize
-                        - get_length(&ls)
-                        - get_length(&ls)
-                        - get_length(&prefix_pad)
-                        - get_length(suffix)
-                        - get_length(prefix)
-                        - self.side_padding as usize * 2,
-                )
-            )
-        } else {
-            writeln!(f, "{}{suffix}{text}", create_pad(" ", suffix, 4))
         }
     }
 

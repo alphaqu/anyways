@@ -36,8 +36,12 @@ impl ProcessingEntry {
 
         AuditSectionEntry {
             prefix_left: Some(self.get_location()),
+            separator: if self.errors.is_some() {
+                "+".red().bold().to_string()
+            } else {
+                "|".to_string()
+            },
             prefix: self.errors,
-            separator: '|',
             prefix_right: self.value.get_module().map(|v| v.purple().to_string()),
             text: value,
             suffix: None,

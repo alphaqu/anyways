@@ -19,6 +19,7 @@ pub mod audit;
 pub mod ext;
 pub mod formatter;
 pub mod processor;
+mod align;
 
 pub type Result<T, E = Audit> = std::result::Result<T, E>;
 
@@ -66,7 +67,7 @@ mod tests {
 
     #[test]
     fn thigns() -> Result<()> {
-        let result = read_plugin_before().wrap_err("Failed to read plugin").wrap(|audit| {
+        read_plugin_before().wrap_err("Failed to read plugin").wrap(|audit| {
             audit.custom_sections.push(AuditSection {
                 name: "Dogs".to_string(),
                 color: DynColors::Ansi(AnsiColors::BrightBlue),
@@ -74,13 +75,11 @@ mod tests {
                     AuditSectionEntry::text("Sheril".to_string())
                 ]
             })
-        });
-
-        result
+        })
     }
 
     fn read_plugin_before() -> Result<()> {
-        match read_plugin() {
+        match very_long_module_also_because_i_can_btw_i_need_this_to_see_if_wrapping_works_correctly::read_plugin_very_long_name_because_i_can_hello_there() {
             Ok(_) => {}
             Err(err) => {
                 return Err(err);
@@ -89,9 +88,14 @@ mod tests {
         Ok(())
     }
 
-    fn read_plugin() -> Result<()> {
-        File::open("./your mom is very gay").wrap_err("Failed to find your mom being gay")?;
+    mod very_long_module_also_because_i_can_btw_i_need_this_to_see_if_wrapping_works_correctly {
+        use std::fs::File;
+        use crate::ext::AuditExt;
 
-        Ok(())
+        pub(crate) fn read_plugin_very_long_name_because_i_can_hello_there() -> crate::Result<()> {
+            File::open("./your mom is very gay").wrap_err("Failed to find your mom being gay")?;
+
+            Ok(())
+        }
     }
 }

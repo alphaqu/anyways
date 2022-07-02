@@ -188,10 +188,10 @@ impl AnywaysAuditProcessor {
                 prefix: None,
                 prefix_left: Some(format!("E{i}").red().to_string()),
                 separator: if i != audit.errors.len() - 1 {
-                    '↓'
+                    "↓"
                 } else {
-                    '→'
-                },
+                    "→"
+                }.white().to_string(),
                 prefix_right: None,
                 text: format!("{}", err.error),
                 suffix: None,
