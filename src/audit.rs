@@ -3,7 +3,7 @@ use crate::{get_audit_formatter, get_audit_processor};
 use backtrace::{Backtrace, Frame};
 use owo_colors::{AnsiColors, DynColors, OwoColorize};
 use std::error::Error;
-use std::fmt::{Debug, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
 /// An Audit is the Error type of Anyways. It allows you to hold any type of error dynamically without worrying about it.
@@ -127,6 +127,12 @@ impl<E: Into<AuditError>> From<E> for Audit {
 
 // this is actually the print error stuff
 impl Debug for Audit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <Audit as Display>::fmt(self, f)
+    }
+}
+
+impl Display for Audit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let audit = get_audit_processor().process(self);
         f.write_char('\n')?;
