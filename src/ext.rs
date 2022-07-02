@@ -60,6 +60,18 @@ impl<T> AuditExt<T> for Result<T, Audit> {
     }
 }
 
+impl<T> AuditExt<T> for Option<T> {
+    fn wrap(self, func: impl FnOnce(&mut Audit)) -> crate::Result<T> {
+        match self {
+            Some(value) => Ok(value),
+            None => {
+                let mut audit = Audit::new_empty();
+                func(&mut audit);
+                Err(audit)
+            }
+        }
+    }
+}
 
 pub(crate) fn get_caller(extra_skips: i32) -> Option<Frame> {
     let mut caller = None;
