@@ -1,7 +1,7 @@
 use crate::ext::get_caller;
 use crate::{get_audit_formatter, get_audit_processor};
 use backtrace::{Backtrace, Frame};
-use owo_colors::{AnsiColors, DynColors, OwoColorize};
+use owo_colors::{AnsiColors, DynColors};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
@@ -28,7 +28,7 @@ impl Audit {
         audit
     }
 
-    pub fn downcast_mut<T: Error + 'static>(&mut self) -> Option<&mut T> {
+    pub fn downcast_mut<T: Err>(&mut self) -> Option<&mut T> {
         for err in &mut self.errors {
             if let Some(err) = err.downcast_mut::<T>() {
                 return Some(err);
@@ -41,7 +41,7 @@ impl Audit {
 
     /// Downcasts the audit to a concrete error type by checking the chain of errors and attempting to downcast them.
     /// If it cannot find any error that matches T it will return None, else it will return Some(value)
-    pub fn downcast_ref<T: Error + 'static>(&self) -> Option<&T> {
+    pub fn downcast_ref<T: Err>(&self) -> Option<&T> {
         for err in &self.errors {
             if let Some(err) = err.downcast_ref::<T>() {
                 return Some(err);
@@ -139,13 +139,25 @@ impl Display for Audit {
         get_audit_formatter().format(f, &audit)
     }
 }
+#[cfg(not(feature = "send"))]
+pub trait SendReq =  'static;
+#[cfg(feature = "send")]
+pub trait SendReq = Send;
+
+#[cfg(not(feature = "sync"))]
+pub trait SyncReq =  'static;
+#[cfg(feature = "sync")]
+pub trait SyncReq = Sync;
+
+pub trait Err = Error + 'static + SendReq + SyncReq;
+
 
 pub struct AuditError {
-    pub error: Box<dyn Error + 'static>,
+    pub error: Box<dyn Err>,
     pub location: Option<Frame>,
 }
 
-impl<E: Into<Box<dyn Error + 'static>>> From<E> for AuditError {
+impl<E: Into<Box<dyn Err>>> From<E> for AuditError {
     fn from(err: E) -> Self {
         AuditError {
             error: err.into(),
@@ -155,7 +167,7 @@ impl<E: Into<Box<dyn Error + 'static>>> From<E> for AuditError {
 }
 
 impl Deref for AuditError {
-    type Target = Box<dyn Error + 'static>;
+    type Target = Box<dyn Err>;
 
     fn deref(&self) -> &Self::Target {
         &self.error

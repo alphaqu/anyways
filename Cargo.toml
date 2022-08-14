@@ -1,6 +1,6 @@
 [package]
 name = "anyways"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 
@@ -19,3 +19,7 @@ exclude = [
 [dependencies]
 backtrace = "0.3.65"
 owo-colors = "3.4.0"
+
+[features]
+send = []
+sync = []

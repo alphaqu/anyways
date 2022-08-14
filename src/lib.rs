@@ -1,3 +1,4 @@
+#![feature(trait_alias)]
 //! # Anyways
 //! Anyways is a dynamic error reporting library.
 //! Which allows you to not worry about creating error types and instead handling errors.
